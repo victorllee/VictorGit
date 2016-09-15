@@ -1,0 +1,39 @@
+CACHE MANIFEST
+# v1 2015-03-01 7abasasaaaa
+# CHESS
+# /theme.css
+# /logo.gif
+# /main.js
+
+blinker.js
+offline.js
+# no longer used: cookie.js
+
+#chess pieces
+    /chess/images/rook_black.png
+	/chess/images/knight_black.png
+	/chess/images/bishop_black.png
+	/chess/images/queen_black.png
+	/chess/images/king_black.png
+	/chess/images/pawn_black.png
+ 
+	/chess/images/rook_white.png
+	/chess/images/knight_white.png
+	/chess/images/bishop_white.png
+	/chess/images/queen_white.png
+	/chess/images/king_white.png
+	/chess/images/pawn_white.png
+	
+	/chess/images/btn_donate_SM.gif
+
+
+NETWORK:
+chessserver.php
+
+*
+https://www.paypal.com/cgi-bin/webscr
+https://www.paypalobjects.com/en_US/i/btn/btn_donate_SM.gif
+https://www.paypalobjects.com/en_US/i/scr/pixel.gif
+
+FALLBACK:
+# /online.js /offline.js

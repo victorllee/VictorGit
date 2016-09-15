@@ -1,0 +1,492 @@
+﻿<!DOCTYPE HTML>
+<html manifest="chess.appcache">
+<head>
+<title>CHESS</title>
+<meta charset="UTF-8">
+<meta author="Victor L. Lee, Janurary 1, 2015">
+<style>
+  .white {float:left; width:80px;height:80px;padding:4px;border:1px solid #111111;background-color:#ffffff;}
+  .black {float:left; width:80px;height:80px;padding:4px;border:1px solid #111111; background-color:#402A2A;}
+  .square {float:left; width:11%}
+  .command {float:left; width:80px;height:40px;padding:4px;border:1px solid #111111; background-color:#60C860; text-align:center; vertical-align:middle;}
+  #board {float:left; width:720px;height:720px;padding:16px; margin:10px; border:2px solid #111111; background-color:#661A00;}
+  #commandpieces {float:left; width:287px;padding:4x; margin:4px; border:2px solid #111111; background-color:lightyellow; display:block;}
+  #pieces{float:right; width:260px;padding:4px; margin:6px; border:2px solid #111111; background-color:white;display:block;}
+  #PieceList {float:left; width:80px;padding:4px;border:1px solid #111111;background-color:#ffffff;}
+  #display {float:right; width:480px;height:600px;padding:4px;border:1px solid #111111;background-color:#ffffff;display:none;overflow-y:scroll;}
+  #chat {float:left; width:270px; height:300px; padding:4px;border:1px solid #111111;background-color:#eeeeee;overflow-y:scroll;}
+  #chatin {float:left; width:220px; height:20px; padding:1px;border:1px solid #111111;background-color:#eeffee;}
+  #chatinstuff {float:right; padding:2px;border:1px solid #111111;background-color:#eeeeee;}
+  #chatstuff {float:right; width:280px; padding:2px;border:1px solid #111111;background-color:#eeeeee;}
+  div:hover {background-color:yellow; /* opacity: 0.4;filter: alpha(opacity=40);  For IE8 and earlier */}
+  div {-webkfit-transition: background-color 500ms ease-in-out; /* For Safari 3.1 to 6.0 */  transition: background-color 0.5s;}
+  
+</style>
+<script>SYSTEM_ONLINE=false;</script>
+<script type="text/javascript" src="blinker.js"></script>
+<script type="text/javascript" src="online.js"></script>
+<script>
+
+
+var sesschat =0;  // updates chat when out of date
+var sessboard=0;  // updates chess board 
+var players = "anyplayer";
+var URL = "http://"+window.location.host+"/";
+var mousepick1="";  // on mouse click, select the piece
+var mousepick2="";  // on 2nd mouse click, select the target
+var heartbeat = 0;
+var defibs = 0;   // defib counter, know how bad the server has been
+var watchdogtimer;
+var watchdogwait = 35000; // milliseconds
+
+function $$bottomNodesById (id, count) {  // remove nodes on top, keep bottom ones
+  var d=document.getElementById(id);
+  while (d.children.length > count) {d.removeChild(d.childNodes[0]);};
+}
+
+function $$ (msg) {
+   var disp = document.getElementById("display");
+   disp.innerHTML = disp.innerHTML+"<div>"+msg+"</div>";
+   disp.scrollTop = 20000;
+   $$bottomNodesById("display", 50);
+}
+function $$chat (msg) {
+   var disp = document.getElementById("chat");
+   disp.innerHTML = disp.innerHTML+"<div>"+msg+"</div>";
+   disp.scrollTop = 20000;
+   $$bottomNodesById("chat",30);
+}
+function $timeStamp(){
+	var d=new Date();
+	var ds=d.getFullYear()+"."+("0"+(d.getMonth()+1)).slice(-2)+"."+d.getDate()+"_"+("0"+(d.getHours())).slice(-2)+":"+("0"+(d.getMinutes())).slice(-2)+":"+("0"+(d.getSeconds())).slice(-2)+"."+("0"+(d.getMilliseconds())).slice(-2);
+	return ds;
+}
+function $$displayOnOff() {
+   var d=document.getElementById("display");
+   if (d.style.display !== "block") {d.style.display="block";} else {d.style.display="none";};
+}
+
+//watchdog algorithm:  Start an interval timer, cycle time 5s larger than the server refresh cycle time, when a pulse is received, the interval timer is set to fresh time, if pulse not received then watchdog initiates a new http cycle on server
+function watchdogpulse() { 
+   $$("WATCHDOG-pulse");
+   window.clearInterval (watchdogtimer); 
+   watchdogtimer = window.setInterval (watchdoghandler, watchdogwait);  // start the awaitingloop(server http request) if timer runs down
+}
+function watchdoghandler() {
+   defibs++;
+   $$("☽"+$timeStamp()+" WATCHDOG-TIMEOUT +"+(watchdogwait/1000)+"s ❤"+heartbeat+" start awaitingLoop().  Defib countt:"+defibs);
+   heartbeat--; // forces the awaiting loop to react; this may temporarily allow multiple http-requests, but wont hurt as the heartbeats counter will only allow 1 ongoing await loop
+   awaitingLoop();
+}
+
+function allowDrop(ev) {
+    ev.preventDefault();
+}
+
+function drag(ev) {
+    ev.dataTransfer.setData("text", ev.target.id);
+}
+
+function drop(ev) {
+	var x; //landing element
+	var t; //target
+	var parentOfTarget; //Parent: reserved for parent of image element
+    ev.preventDefault();
+    var data = ev.dataTransfer.getData("text");
+	x = document.getElementById(data);
+	t = ev.target;
+
+	if (ev.target instanceof HTMLImageElement) {
+		t = ev.target.parentNode;
+		document.getElementById("pieces").appendChild(ev.target);
+	}
+	t.appendChild(x);
+    saveGame();
+}
+
+function pickPiece() {  // mouse click handler, to pick the chess piece and to pick the target 
+  if (this.hasChildNodes() && mousepick1 ==="") {
+    mousepick1 = this.childNodes[0]; // pick first, must be a piece, and no other piece selected
+    this.style.borderColor = "red";
+  } else if (!(mousepick1 ==="")) {
+    mousepick2 = this;  // pick2
+    mousepick1.parentNode.style.borderColor = "black";
+	if (this.firstChild) document.getElementById("pieces").appendChild(this.firstChild);  // remove piece, move to the side
+	this.appendChild(mousepick1);  // put the chosen piece on target square
+	$$("append node "+this.firstChild.id);
+	mousepick1 = "";  // clear for next pick
+	saveGame();
+  }
+  $$("Mouse clicked on: "+this.id+".  Piece pick1:"+(mousepick1.id?mousepick1.id:"none") +", pick2:"+(mousepick2.id?mousepick2.id:"none"));
+}
+
+function AJAX(url,parameters,responder) {
+	var xmlhttp = new XMLHttpRequest();
+	xmlhttp.onreadystatechange=function() {
+		if (xmlhttp.readyState == 4 && xmlhttp.status == 200) {
+			responder(xmlhttp.responseText);
+        } else {  
+           $$("AJAX Status:"+xmlhttp.statusText+"  readyState:"+xmlhttp.readyState);  
+		}
+	};
+	xmlhttp.open("POST", url, true);
+	xmlhttp.setRequestHeader("Content-type", "application/x-www-form-urlencoded");
+	xmlhttp.send(parameters);
+	$$("AJAX call, heartbeaters:"+heartbeat+" - "+parameters.substring(0,30)+"...");
+}
+
+
+function awaitingLoop() {
+	var u=URL+"chess/chessserver.php";
+	var p="command=awaiting&msg=request_server_to_await&sesschat="+sesschat.toString()+"&sessboard="+sessboard.toString()+"&players="+players;
+    heartbeat++;      // count the httprequests
+    watchdogpulse();  // send a pulse, because wait loop is consumed
+	AJAX(u,p,masterResponder);
+}
+function sendChat () {
+	var u=URL+"chess/chessserver.php";
+	var namevalue=encodeURI(document.getElementById("chatin").value);
+	var p="command=chat&msg="+namevalue+"&sesschat="+sesschat.toString()+"&sessboard="+sessboard.toString()+"&players="+players;
+	document.getElementById("chatin").value="";// clear the talk box
+	AJAX(u,p,masterResponder);
+}
+
+
+function gameList() {  // getGameList: request server to provide a list of current games
+    players=document.getElementById("players").value.toLowerCase();
+	var u=URL+"chess/chessserver.php";
+	var p="command=gameList&msg=Get_current_games&sesschat="+sesschat.toString()+"&sessboard="+sessboard.toString()+"&players="+players;
+	AJAX(u,p,masterResponder);
+}
+
+function joinGame () {  // joinGame: request server to join a game, if the pieces from the server exists, else new game
+    players=document.getElementById("players").value.toLowerCase();
+	var u=URL+"chess/chessserver.php";
+	var p="command=join&msg=joining_a_different_game&sesschat="+sesschat.toString()+"&sessboard="+sessboard.toString()+"&players="+players;
+	AJAX(u,p,masterResponder);
+}
+
+function saveGame () {  // saveGame: save the pieces to the server
+	var u=URL+"chess/chessserver.php";
+	var b=getLocalBoardJSON();
+	var p="command=save&msg="+b+"&sesschat="+sesschat.toString()+"&sessboard="+sessboard.toString()+"&players="+players;
+	AJAX(u,p,masterResponder);
+
+	localStorage.setItem (players, b);
+}
+
+function newGame () {   // assuming: (temporary)  the loadGame loads the pieces into the id Pieces, can rewrite later to do a fresh load
+	var u=URL+"chess/chessserver.php";
+	var p="command=new&msg=start_new_game&sesschat="+sesschat.toString()+"&sessboard="+sessboard.toString()+"&players="+players;
+	AJAX(u,p,masterResponder);
+}
+
+function masterResponder(response) {
+    var arr = JSON.parse(response);
+    var i;
+    var out = "";
+   for(i = 0; i < arr.length; i++) {
+      // display the STATE info from the server
+      $$(""+i+":"+heartbeat+"❤"+arr[i].timestamp+":"+arr[i].state+" - "+arr[i].msg+" <div onclick='this.childNodes[0].style.display=\"inline\"'><div style='display:none'>"+JSON.stringify(arr[i].data)+"</div>[Board]</div>");
+      sesschat  = arr[i].sesschat ||0;
+      sessboard = arr[i].sessboard||0;
+	  
+	  // process the state commands
+      switch (arr[i].state) {
+	  case "awaiting":
+        heartbeat--;      // response received, httprequest counted
+		if (heartbeat<1)  awaitingLoop();   // start next wait cycle - if no other heartbeat is happening
+		break;
+	  case "boardupdate": // new board stuff!  
+        heartbeat--;      // response received, httprequest counted
+        placePieces(arr[i].data);
+		awaitingLoop();   // - start next awaiting cycle 
+		break;
+	  case "chatupdate":  // new chat stuff!
+        heartbeat--;      // response received, httprequest counted
+		$$chat(arr[i].msg);
+		awaitingLoop();   // - start next awaiting cycle 
+		break;
+	  case "gamelistupdate":  //  list of active games on server
+	    updateGameList (arr[i].data);
+        //heartbeat--;      // response received, httprequest counted
+		break;
+	  case "joinupdate":  //  join a new board, old game is now departed
+        //heartbeat--;      // response received, httprequest counted
+		break;
+	  case "chatACK":     // CHAT has been received
+		break;
+	  case "joinACK":     // JOIN has been received
+        heartbeat--;      // response received, httprequest counted
+ 		awaitingLoop();   // - start next awaiting cycle 
+        break;
+	  case "newACK":      // NEW has been received
+        break;
+	  case "saveACK":     // SAVE has been received
+		break;
+	  default:
+	    alert ("Server sent a UNKNOWN STATE.");
+		break;
+	  }
+    }
+}
+
+function placePieces(game) {
+    var i;
+	var peiceId;
+    for(i = 0; i < game.length; i++) {
+		peiceId = document.getElementById(game[i].Color + game[i].Piece);
+		document.getElementById(game[i].Cell).appendChild(peiceId);
+    }
+}
+
+function getLocalBoardJSON () {
+    var b = '';
+	var i = 0;  //index for board
+    var pieces = document.getElementsByClassName("piece");  // get all pieces
+	for(i=0; i < pieces.length; i++) {
+           if (i>0) b+=",";
+		   b += '{"Piece":"'+pieces[i].id.substr(1,2) +'","Color":"'+(pieces[i].id).substr(0,1).toUpperCase()+ '","Cell":"'+pieces[i].parentNode.id+'"}';
+	}
+	b = "["+b+"]";
+	return b;
+}
+
+function updateGameList (gamelist) {
+      var dataList = document.getElementById("gamelist");
+	  while (dataList.firstChild) dataList.removeChild(dataList.firstChild); // clear existing list
+	  
+      // Loop over the JSON array.
+      gamelist.forEach(function(item) {
+        var option = document.createElement('option');   // Create a new <option> element.
+        option.value = item.game;                        // Set the value using the item in the array.
+        dataList.appendChild(option);                    // Add the <option> element to the <datalist>.
+      });
+
+      // Update the placeholder text.
+//      input.placeholder = "e.g. datalist";
+}
+
+function localRestore() {
+	if (localStorage.getItem(players) !== null) {
+		placePieces(JSON.parse(localStorage.getItem (players)));
+	}
+	saveGame();  // send update to the server and other player
+}
+
+function classTest() {
+var x =document.getElementsByClassName("square");
+var s = "";
+var ids = "";
+	for (var i =0; i<x.length; i++) {
+	  s += " "+x[i].id;
+	//  x[i].onclick = turnGreen;
+	  x[i].onclick = function(){this.style.backgroundColor="green";};
+	//  x[i].ondrop = function(){drop(this.event);}
+	  x[i].addEventListener("drop",function() {drop(event)});
+	};
+    //alert (s);
+}
+
+
+function initialize() {
+    $$("System ONLINE: " + (SYSTEM_ONLINE?"true":"false")); 
+
+	var x =document.getElementsByClassName("square");
+	for (var i =0; i<x.length; i++) {
+		x[i].addEventListener("drop",drop);
+		x[i].addEventListener("dragover",allowDrop);
+        x[i].onclick = pickPiece;
+	};
+	
+	x =document.getElementsByClassName("piece");
+	for (i =0; i<x.length; i++) {
+		x[i].setAttribute('draggable',true);
+		x[i].addEventListener("dragstart",drag);
+		x[i].style.width="80px";
+		x[i].style.height="80px";
+	};
+	watchdogpulse();
+	awaitingLoop(); 
+	document.getElementById('players').value=players; 
+	//document.getElementById('players').addEventListener("input",joinGame);
+	// from inline:  onkeydown="if(event.keyCode == 13){joinGame();return false;}"
+
+	gameList();
+	blinkblink();
+
+    if (!SYSTEM_ONLINE) {localRestore()};  // restore default game if not online
+}
+
+//KLUDGE: will work on HTML5 with dragevents, but really has only been tested in Chrome (for now).
+	var isOpera = !!window.opera || navigator.userAgent.indexOf(' OPR/') >= 0;
+    // Opera 8.0+ (UA detection to detect Blink/v8-powered Opera)
+	var isFirefox = typeof InstallTrigger !== 'undefined';   // Firefox 1.0+
+	var isSafari = Object.prototype.toString.call(window.HTMLElement).indexOf('Constructor') > 0;
+    // At least Safari 3+: "[object HTMLElementConstructor]"
+	var isChrome = !!window.chrome && !isOpera;              // Chrome 1+
+	var isIE = /*@cc_on!@*/false || !!document.documentMode; // At least IE6
+
+// if(!isChrome) alert("This software was developed for HTML5, and is meant to run on Chrome.  Proceed at your own risk!");
+</script>
+</head>
+
+<body onload="initialize();">
+<p>CHESS - ♔ ♕ ♖ ♗ ♘ ♙ ♚ ♛ ♜ ♝ ♞ ♟ -It's an old fashion chess board for you to play on! Drag pieces to where you want them!</p>
+
+<form action="https://www.paypal.com/cgi-bin/webscr" method="post" target="_top">
+<input type="hidden" name="cmd" value="_s-xclick">
+<input type="hidden" name="hosted_button_id" value="EXJKPSDXFT6V8">
+<input type="image" src="images/btn_donate_SM.gif" border="0" name="submit" alt="PayPal - The safer, easier way to pay online!" style="position:fixed; top:8px; right:30px;">
+<img alt="" border="0" src="https://www.paypalobjects.com/en_US/i/scr/pixel.gif" width="1" height="1" style="position:fixed; top:1px; right:1px;">
+</form>
+
+
+
+<div id="board">
+
+<div id="A8" class="white square"></div>
+<div id="B8" class="black square"></div>
+<div id="C8" class="white square"></div>
+<div id="D8" class="black square"></div>
+<div id="E8" class="white square"></div>
+<div id="F8" class="black square"></div>
+<div id="G8" class="white square"></div>
+<div id="H8" class="black square"></div>
+
+<div id="A7" class="black square"></div>
+<div id="B7" class="white square"></div>
+<div id="C7" class="black square"></div>
+<div id="D7" class="white square"></div>
+<div id="E7" class="black square"></div>
+<div id="F7" class="white square"></div>
+<div id="G7" class="black square"></div>
+<div id="H7" class="white square"></div>
+
+<div id="A6" class="white square"></div>
+<div id="B6" class="black square"></div>
+<div id="C6" class="white square"></div>
+<div id="D6" class="black square"></div>
+<div id="E6" class="white square"></div>
+<div id="F6" class="black square"></div>
+<div id="G6" class="white square"></div>
+<div id="H6" class="black square"></div>
+
+<div id="A5" class="black square"></div>
+<div id="B5" class="white square"></div>
+<div id="C5" class="black square"></div>
+<div id="D5" class="white square"></div>
+<div id="E5" class="black square"></div>
+<div id="F5" class="white square"></div>
+<div id="G5" class="black square"></div>
+<div id="H5" class="white square"></div>
+
+<div id="A4" class="white square"></div>
+<div id="B4" class="black square"></div>
+<div id="C4" class="white square"></div>
+<div id="D4" class="black square"></div>
+<div id="E4" class="white square"></div>
+<div id="F4" class="black square"></div>
+<div id="G4" class="white square"></div>
+<div id="H4" class="black square"></div>
+
+<div id="A3" class="black square"></div>
+<div id="B3" class="white square"></div>
+<div id="C3" class="black square"></div>
+<div id="D3" class="white square"></div>
+<div id="E3" class="black square"></div>
+<div id="F3" class="white square"></div>
+<div id="G3" class="black square"></div>
+<div id="H3" class="white square"></div>
+
+<div id="A2" class="white square"></div>
+<div id="B2" class="black square"></div>
+<div id="C2" class="white square"></div>
+<div id="D2" class="black square"></div>
+<div id="E2" class="white square"></div>
+<div id="F2" class="black square"></div>
+<div id="G2" class="white square"></div>
+<div id="H2" class="black square"></div>
+
+<div id="A1" class="black square"></div>
+<div id="B1" class="white square"></div>
+<div id="C1" class="black square"></div>
+<div id="D1" class="white square"></div>
+<div id="E1" class="black square"></div>
+<div id="F1" class="white square"></div>
+<div id="G1" class="black square"></div>
+<div id="H1" class="white square"></div>
+
+</div>
+
+<div id="display">Received from the server:</div>
+
+<div id="chatstuff">
+	<div id="chat"></div>
+	<div id="chatinstuff">
+	<input type="text" id="chatin" name="chatin" onkeydown="if(event.keyCode == 13){sendChat();return false;}" value='I wanna say.. Move the knight!'></input>
+	<button type="button" onclick="sendChat();">Chat</button>
+	</div>
+</div>
+
+<div id="commandpieces">
+	<div id="NewGame" class="command" onclick="if(confirm('New Game?')){newGame();}">New Game</div>
+	<div id="SystemMonitor" class="command" onclick="$$displayOnOff();">System Monitor</div>
+	<button type="button" onclick="classTest(); gameList();">class test</button>
+	<button type="button" onclick="localRestore();">Restore Last</button>
+	
+	<input list="gamelist" placeholder="anyplayer" id="players" name="players" minlength="1" maxlength="12" pattern=".{1,12}" required title="1 to 12 characters" oninvalid="this.setCustomValidity('Put the name of the game here.')" onkeydown="if(event.keyCode == 13){joinGame();return false;}"></input>
+
+	<datalist id="gamelist">
+		<option value="anyplayer">
+	</datalist>
+	
+	
+	<button type="button" onclick="joinGame();">Join</button>
+	<br />
+	<div id="pieces" class="square">
+	<img id="BR1" class="piece" src="images/rook_black.png">
+	<img id="BN1" class="piece" src="images/knight_black.png">
+	<img id="BB1" class="piece" src="images/bishop_black.png">
+	<img id="BQ" class="piece" src="images/queen_black.png">
+	<img id="BK" class="piece" src="images/king_black.png">
+	<img id="BB2" class="piece" src="images/bishop_black.png">
+	<img id="BN2" class="piece" src="images/knight_black.png">
+	<img id="BR2" class="piece" src="images/rook_black.png">
+ 
+	<img id="BP1" class="piece" src="images/pawn_black.png">
+	<img id="BP2" class="piece" src="images/pawn_black.png">
+	<img id="BP3"  class="piece" src="images/pawn_black.png">
+	<img id="BP4"  class="piece" src="images/pawn_black.png">
+	<img id="BP5"  class="piece" src="images/pawn_black.png">
+	<img id="BP6"  class="piece" src="images/pawn_black.png">
+	<img id="BP7"  class="piece" src="images/pawn_black.png">
+	<img id="BP8"  class="piece" src="images/pawn_black.png">
+
+	<img id="WP1"  class="piece" src="images/pawn_white.png">
+	<img id="WP2"  class="piece" src="images/pawn_white.png">
+	<img id="WP3"  class="piece" src="images/pawn_white.png">
+	<img id="WP4"  class="piece" src="images/pawn_white.png">
+	<img id="WP5"  class="piece" src="images/pawn_white.png">
+	<img id="WP6"  class="piece" src="images/pawn_white.png">
+	<img id="WP7"  class="piece" src="images/pawn_white.png">
+	<img id="WP8"  class="piece" src="images/pawn_white.png">
+ 
+	<img id="WR1"  class="piece" src="images/rook_white.png">
+	<img id="WN1"  class="piece" src="images/knight_white.png">
+	<img id="WB1"  class="piece" src="images/bishop_white.png">
+	<img id="WQ"  class="piece" src="images/queen_white.png">
+	<img id="WK"  class="piece" src="images/king_white.png">
+	<img id="WB2"  class="piece" src="images/bishop_white.png">
+	<img id="WN2"  class="piece" src="images/knight_white.png">
+	<img id="WR2"  class="piece" src="images/rook_white.png">
+
+	<img id="WQ2"  class="piece" src="images/queen_white.png">
+	<img id="BQ2"  class="piece" src="images/queen_black.png">
+
+	</div>
+
+</div>
+
+</body>
+</html>
